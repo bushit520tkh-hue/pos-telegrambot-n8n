@@ -1,4 +1,4 @@
-#AI-Powered Menu Digitization & POS Import Automation
+# 明录 (Ming Records) — AI-Powered Menu Digitization & POS Import Automation
 
 > Self-initiated automation system built during an IT internship, now being incubated as a
 > commercial product for F&B and traditional small businesses in Malaysia.
