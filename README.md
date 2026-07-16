@@ -3,7 +3,7 @@
 > Self-initiated automation system built during an IT internship, now being incubated as a
 > commercial product for F&B and traditional small businesses in Malaysia.
 <p align="center">
-  <img src="demo.png" width="600">
+  <img src="demo.png" width="1000">
 </p>
 ## Problem
 
