@@ -1,0 +1,381 @@
+{
+  "name": "DEEPP AUTO P1 (3FS Telegrambot) - Worker",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "8619c4bc-9aee-432a-9da2-10576446134f",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dc366e62-7283-4d72-a8c2-ffc6355b89d7",
+              "leftValue": "={{ $json.mime_type }}",
+              "rightValue": "text/plain",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        208,
+        0
+      ],
+      "id": "89aaf2bc-1c35-4352-885f-59383d4fca84",
+      "name": "If - Is Media File"
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/botYOUR_TELEGRAM_BOT_TOKEN/getFile",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "=file_id",
+              "value": "={{ $json.file_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        448,
+        -224
+      ],
+      "id": "41acf146-a6b9-41be-a3d2-da76c6c9a367",
+      "name": "HTTP Request - Telegram Get File"
+    },
+    {
+      "parameters": {
+        "jsCode": "const filterItems = $('When Executed by Another Workflow').all();\n\nlet caption = '';\nlet chatId = null;\nconst imageParts = [];\n\nfor (let i = 0; i < filterItems.length; i++) {\n  const filterItem = filterItems[i];\n  if (!caption && filterItem.json.caption) caption = filterItem.json.caption;\n  if (!chatId) chatId = filterItem.json.chat_id;\n\n  const mimeType = filterItem.json.mime_type || 'image/jpeg';\n\n  if (mimeType === 'text/plain') {\n    // 纯文字消息，直接当text part传给Gemini\n    imageParts.push({\n      text: `以下是菜单文字内容：\\n${filterItem.json.text_content}`\n    });\n  } else {\n    // 照片或PDF，从HTTP Request2拿binary数据\n    const binaryDataBuffer = await this.helpers.getBinaryDataBuffer(i, 'data');\n    const base64Data = binaryDataBuffer.toString('base64');\n    imageParts.push({\n      inline_data: {\n        mime_type: mimeType,\n        data: base64Data\n      }\n    });\n  }\n}\n\nconst geminiRequest = {\n  contents: [{\n    parts: [\n      {\n        text: `你是一个POS系统商品导入助手。以下是用户的备注规则：\\n${caption}\\n\\n请根据以下所有菜单图片/文字/文件提取全部商品，合并成一个列表，严格只输出JSON，不要任何解释文字：\\n{\"items\":[{\"name\":\"商品名\",\"category\":\"分类\",\"spec\":\"规格\",\"stock_qty\":0,\"cost_price\":0,\"sell_price\":0.00}],\"flagged\":[]}`\n      },\n      ...imageParts\n    ]\n  }]\n};\n\nreturn [{\n  json: {\n    chatId: chatId,\n    caption: caption,\n    photoCount: filterItems.length,\n    geminiRequest: geminiRequest\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        16
+      ],
+      "id": "5bca5eec-4da7-4c35-9e94-f6447925e985",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.telegram.org/file/botYOUR_TELEGRAM_BOT_TOKEN/{{ $json.result.file_path }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        656,
+        -224
+      ],
+      "id": "4a28dfd8-6214-4108-9ef4-b84cd9cc0b65",
+      "name": "HTTP Request - Telegram Download File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=YOUR_GEMINI_API_KEY",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "=json",
+        "specifyBody": "json",
+        "bodyParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "jsonBody": "={{ $json.geminiRequest }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1136,
+        16
+      ],
+      "id": "421df2c7-646a-4e41-a5db-b70ccf93190c",
+      "name": "HTTP Request3",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput",
+      "notes": "// 检查Gemini是否失败\nconst firstItem = $input.first();\nif (firstItem.json.error) {\n  const chatId = $('Code in JavaScript1').first().json.chatId;\n  const errMsg = firstItem.json.error.message || '';\n  let reason = 'AI 服务暂时出现问题，请稍后重试。';\n  if (errMsg.includes('unavailable') || errMsg.includes('overload') || errMsg.includes('high demand')) {\n    reason = 'AI 服务器目前流量过高，请等待约 1 分钟后重新发送。';\n  } else if (errMsg.includes('quota') || errMsg.includes('rate')) {\n    reason = 'AI 请求次数已达上限，请等待约 1 分钟后重新发送。';\n  }\n  await this.helpers.httpRequest({\n    method: 'POST',\n    url: `https://api.telegram.org/bot你的TOKEN/sendMessage`,\n    headers: { 'Content-Type': 'application/json' },\n    body: { chat_id: chatId, text: `❌ 处理失败：${reason}` },\n    json: true\n  });\n  return [];\n}"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ExcelJS = require('exceljs');\n\n// 收集所有照片的Gemini识别结果\nconst allItems = [];\nconst allFlagged = [];\nlet chatId = null;\n\nfor (const item of $input.all()) {\n  // 先检查这个item是不是Gemini请求失败留下的错误\n  if (item.json.error || !item.json.candidates) {\n    const failedChatId = $('Code in JavaScript1').first().json.chatId;\n    const errMsg = item.json.error?.message || 'Gemini请求失败，请稍等一下再试一次（可能是请求太频繁）。';\n    if (failedChatId) {\n      try {\n        await this.helpers.httpRequest({\n          method: 'POST',\n          url: `https://api.telegram.org/botYOUR_TELEGRAM_BOT_TOKEN/sendMessage`,\n          headers: { 'Content-Type': 'application/json' },\n          body: { chat_id: failedChatId, text: `⚠️ 识别失败：${errMsg}` },\n          json: true\n        });\n      } catch (e) { /* 通知失败也不要让整个节点崩 */ }\n    }\n    return [];\n  }\n  const rawText = item.json.candidates[0].content.parts[0].text;\n  const cleaned = rawText.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const parsed = JSON.parse(cleaned);\n  allItems.push(...parsed.items);\n  if (parsed.flagged) allFlagged.push(...parsed.flagged);\n}\n\n// 从上游节点拿chat_id\nchatId = $('Code in JavaScript1').first().json.chatId;\n\n// 生成xlsx\nconst workbook = new ExcelJS.Workbook();\nconst ws = workbook.addWorksheet('Sheet1');\n\nconst headers = [\n  '名称（必填）','分类（必填）','条码','规格','主单位','库存量',\n  '进货价（必填）','销售价（必填）','毛利率','批发价','会员价','会员折扣',\n  '积分商品','库存上限','库存下限','品牌','供货商','生产日期','保质期',\n  '拼音码','标签打印','自定义2','自定义3','商品状态','商品描述','不计库存',\n  'NORMAL售价','2%售价','SILVER售价','FOOD PANDA售价','Staff售价','VIP售价',\n  'Business Owner售价','gold售价','VVIP售价','demo售价','New Member售价',\n  'member售价','COCKTAILS售价','1 MONTH售价','2 MONTHS售价','EXPIRED售价','香江等级售价'\n];\n\nheaders.forEach((h, i) => {\n  ws.getCell(1, i + 1).value = h;\n});\n\nallItems.forEach((item, rowIdx) => {\n  const r = rowIdx + 2;\n  ws.getCell(r, 1).value = item.name || '';\n  ws.getCell(r, 2).value = item.category || '';\n  ws.getCell(r, 4).value = item.spec || '';\n  ws.getCell(r, 6).value = item.stock_qty ?? 0;\n  ws.getCell(r, 7).value = item.cost_price ?? 0;\n  ws.getCell(r, 8).value = Number(item.sell_price) || 0;\n  ws.getCell(r, 8).numFmt = '0.00';\n});\n\nconst buffer = await workbook.xlsx.writeBuffer();\nconst base64 = buffer.toString('base64');\n\nreturn [{\n  json: {\n    chat_id: chatId,\n    itemCount: allItems.length,\n    photoCount: $input.all().length,\n    flagged: allFlagged\n  },\n  binary: {\n    file: {\n      data: base64,\n      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',\n      fileName: 'menu_import.xlsx'\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        16
+      ],
+      "id": "20072954-73c3-4dd1-b484-6bc517a0d62d",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 这个workflow现在不用管锁了（Gemini慢不会再拖累接待员），\n// 只需要把items原样传下去给发送文件的节点\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        16
+      ],
+      "id": "0d985576-a5dc-4df6-9414-e84c5eead30e",
+      "name": "Mark Awaiting Feedback"
+    },
+    {
+      "parameters": {
+        "operation": "sendDocument",
+        "chatId": "={{ $json.chat_id }}",
+        "binaryData": true,
+        "binaryPropertyName": "file",
+        "additionalFields": {
+          "caption": "=✅ 识别完成！共 {{ $json.itemCount }} 个商品。{{ $json.flagged.length > 0 ? '⚠️ 以下分类需要你确认：' + $json.flagged.join('、') : '所有分类已自动填好。' }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1760,
+        16
+      ],
+      "id": "335dbf35-38fd-41c9-8b3d-05fc77acab7c",
+      "name": "Send a document",
+      "webhookId": "61dd9f4d-c050-45d6-b569-99e4f001c893",
+      "credentials": {
+        "telegramApi": {
+          "id": "D2p2oB32Ux6EAXxq",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.result.chat.id }}",
+        "text": "这次的识别效果怎么样？有什么想让我改进的可以直接打字告诉我 🙏",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "⭐",
+                    "additionalFields": {
+                      "callback_data": "rate_1"
+                    }
+                  },
+                  {
+                    "text": "⭐⭐",
+                    "additionalFields": {
+                      "callback_data": "rate_2"
+                    }
+                  },
+                  {
+                    "text": "⭐⭐⭐",
+                    "additionalFields": {
+                      "callback_data": "rate_3"
+                    }
+                  },
+                  {
+                    "text": "⭐⭐⭐⭐",
+                    "additionalFields": {
+                      "callback_data": "rate_4"
+                    }
+                  },
+                  {
+                    "text": "⭐⭐⭐⭐⭐",
+                    "additionalFields": {
+                      "callback_data": "rate_5"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1968,
+        16
+      ],
+      "id": "e5ac4fc1-6d3e-4269-9b62-a8b1fd49a2e4",
+      "name": "Send a text message",
+      "webhookId": "eee3ed4f-0359-413f-b596-e1777262b578",
+      "credentials": {
+        "telegramApi": {
+          "id": "D2p2oB32Ux6EAXxq",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "If - Is Media File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If - Is Media File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Telegram Get File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Telegram Get File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request - Telegram Download File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request - Telegram Download File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Mark Awaiting Feedback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Awaiting Feedback": {
+      "main": [
+        [
+          {
+            "node": "Send a document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a document": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "faed601f-aba1-4989-990d-9eac60ef2618",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "abd1e076cf9364cdee08c4e5b69fa9029fa737d255bf2c5aa93da83f244f1087"
+  },
+  "nodeGroups": [],
+  "id": "VMzQPaf41Ejk8Eco",
+  "tags": []
+}
